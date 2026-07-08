@@ -219,6 +219,10 @@ async function renderAgenda(el) {
   el.innerHTML = `<p class="text-sm text-[#8A8168] px-1 mb-4">${isHost ? "Ajoute un thème pour chaque jour de la semaine." : "Thèmes de la semaine ajoutés par l'hôte."}</p><div id="agenda-list" class="space-y-4"></div>`;
 
   async function load() {
+    const existingList = document.getElementById("agenda-list");
+    if (existingList && (existingList.querySelector(".add-form:not(.hidden)") || existingList.contains(document.activeElement))) {
+      return; // un formulaire est ouvert ou en cours de saisie : ne pas rafraîchir maintenant
+    }
     const events = await api("/api/agenda");
     const list = document.getElementById("agenda-list");
     if (!list) return;
