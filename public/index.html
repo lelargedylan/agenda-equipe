@@ -263,6 +263,8 @@ async function renderAgenda(el) {
           const desc = form.querySelector(".ev-desc").value.trim();
           if (!title) return;
           await api("/api/agenda", { method:"POST", body:{ day: btn.dataset.day, title, desc, by: me } });
+          form.classList.add("hidden");
+          form.innerHTML = "";
           load();
         };
       }
