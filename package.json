@@ -1,0 +1,16 @@
+{
+  "name": "agenda-equipe-serveur",
+  "version": "1.0.0",
+  "description": "Serveur complet : agenda, mémos, tchat, amis, fichiers",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
