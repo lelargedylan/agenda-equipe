@@ -121,7 +121,19 @@ app.post("/api/config/host-login", (req, res) => {
   }
   res.json({ ok: true });
 });
-
+app.post("/api/memos/reset", (req, res) => {
+  if (!state.config) return badRequest(res, "Agenda non initialisé.");
+  const { name, hostPassword } = req.body || {};
+  if (!name?.trim() || !hostPassword) return badRequest(res, "Champs manquants.");
+  const hash = hashPassword(hostPassword.trim(), state.config.salt);
+  if (hash !== state.config.hostPasswordHash) {
+    return res.status(401).json({ error: "Mot de passe hôte incorrect." });
+  }
+  if (!state.memoSecrets) state.memoSecrets = {};
+  delete state.memoSecrets[name.trim()];
+  saveState();
+  res.json({ ok: true });
+});
 /* ---------------- Agenda ---------------- */
 app.get("/api/agenda", (req, res) => res.json(state.agenda));
 
