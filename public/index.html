@@ -23,7 +23,7 @@ const JOURS = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi"];
 const RUBAN = ["#B23A3A","#C99A3D","#3A7D63","#2F6690","#7A4E9E"];
 
 function startOfWeekMonday(d){ const date=new Date(d); const day=date.getDay(); const diff=(day+6)%7; date.setDate(date.getDate()-diff); date.setHours(0,0,0,0); return date; }
-function isoDate(d){ return d.toISOString().slice(0,10); }
+function isoDate(d){ const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,"0"); const day=String(d.getDate()).padStart(2,"0"); return `${y}-${m}-${day}`; }
 function weekDates(){ const monday=startOfWeekMonday(new Date()); return JOURS.map((_,i)=>{ const d=new Date(monday); d.setDate(monday.getDate()+i); return isoDate(d); }); }
 function fmtDay(iso){ const d=new Date(iso+"T00:00:00"); return d.toLocaleDateString("fr-FR",{day:"numeric",month:"short"}); }
 function esc(s){ const div=document.createElement("div"); div.textContent = s ?? ""; return div.innerHTML; }
