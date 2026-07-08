@@ -44,8 +44,30 @@ let me = localStorage.getItem("agenda_name") || "";
 let isHost = false;
 let currentTab = "agenda";
 let currentDM = null;
+let lastReadChatTs = Number(localStorage.getItem("agenda_chat_lastread") || 0);
+let badgeTimer = null;
 
 const root = document.getElementById("app");
+
+async function updateChatBadge() {
+  try {
+    const msgs = await api("/api/chat");
+    const unread = msgs.filter(m => m.ts > lastReadChatTs && m.author !== me).length;
+    const badge = document.getElementById("chat-badge");
+    if (!badge) return;
+    if (unread > 0 && currentTab !== "chat") {
+      badge.textContent = unread > 99 ? "99+" : String(unread);
+      badge.classList.remove("hidden");
+    } else {
+      badge.classList.add("hidden");
+    }
+  } catch {}
+}
+function markChatRead() {
+  lastReadChatTs = Date.now();
+  localStorage.setItem("agenda_chat_lastread", String(lastReadChatTs));
+  updateChatBadge();
+}
 
 /* ============== Écran d'entrée ============== */
 async function renderGate() {
@@ -141,6 +163,9 @@ function renderApp() {
   renderHostBadge();
   renderTabbar();
   renderTab();
+  if (badgeTimer) clearInterval(badgeTimer);
+  badgeTimer = setInterval(updateChatBadge, 5000);
+  updateChatBadge();
 }
 
 function renderHostBadge() {
@@ -195,11 +220,13 @@ const TABS = [
 function renderTabbar() {
   const bar = document.getElementById("tabbar");
   bar.innerHTML = TABS.map(t => `
-    <button data-tab="${t.id}" class="flex-1 flex flex-col items-center gap-1 py-2.5" style="color:${currentTab===t.id?'#C99A3D':'#7B8791'}">
+    <button data-tab="${t.id}" class="relative flex-1 flex flex-col items-center gap-1 py-2.5" style="color:${currentTab===t.id?'#C99A3D':'#7B8791'}">
       <span style="font-size:18px">${t.icon}</span>
       <span class="text-[10px] font-medium">${t.label}</span>
+      ${t.id==="chat" ? `<span id="chat-badge" class="hidden absolute top-1 right-1/4 bg-[#B23A3A] text-white text-[10px] font-bold rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-1"></span>` : ""}
     </button>`).join("");
   bar.querySelectorAll("button").forEach(b => b.onclick = () => { currentTab = b.dataset.tab; currentDM=null; renderTabbar(); renderTab(); });
+  updateChatBadge();
 }
 
 let pollTimer = null;
@@ -304,6 +331,7 @@ async function renderMemos(el) {
 
 /* ============== Tchat ============== */
 async function renderChat(el) {
+  markChatRead();
   el.innerHTML = `
     <div class="flex flex-col" style="height:calc(100vh - 190px)">
       <div id="chat-list" class="flex-1 overflow-y-auto space-y-2 px-1 pb-2"></div>
@@ -332,6 +360,7 @@ async function renderChat(el) {
     const fresh = await api("/api/chat");
     messages = fresh;
     draw();
+    markChatRead();
   }
   await load();
   pollTimer = setInterval(load, 3000);
