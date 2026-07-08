@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Agenda d'équipe</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: Inter, system-ui, sans-serif; background:#16232B; color:#F5F1E8; }
+  .paper { background:#F5F1E8; color:#1E2A32; }
+  input, textarea { outline:none; }
+  input:focus, textarea:focus { box-shadow: 0 0 0 2px #C99A3D; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-thumb { background:#2A3A43; border-radius:3px; }
+</style>
+</head>
+<body class="min-h-screen">
+<div id="app"></div>
+
+<script>
+/* ============== Utilitaires ============== */
+const JOURS = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi"];
+const RUBAN = ["#B23A3A","#C99A3D","#3A7D63","#2F6690","#7A4E9E"];
+
+function startOfWeekMonday(d){ const date=new Date(d); const day=date.getDay(); const diff=(day+6)%7; date.setDate(date.getDate()-diff); date.setHours(0,0,0,0); return date; }
+function isoDate(d){ return d.toISOString().slice(0,10); }
+function weekDates(){ const monday=startOfWeekMonday(new Date()); return JOURS.map((_,i)=>{ const d=new Date(monday); d.setDate(monday.getDate()+i); return isoDate(d); }); }
+function fmtDay(iso){ const d=new Date(iso+"T00:00:00"); return d.toLocaleDateString("fr-FR",{day:"numeric",month:"short"}); }
+function esc(s){ const div=document.createElement("div"); div.textContent = s ?? ""; return div.innerHTML; }
+
+async function api(path, opts={}) {
+  const res = await fetch(path, {
+    method: opts.method || "GET",
+    headers: opts.body ? {"Content-Type":"application/json"} : undefined,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok) throw new Error(data.error || "Erreur serveur");
+  return data;
+}
+
+/* ============== État local ============== */
+let me = localStorage.getItem("agenda_name") || "";
+let isHost = false;
+let currentTab = "agenda";
+let currentDM = null;
+
+const root = document.getElementById("app");
+
+/* ============== Écran d'entrée ============== */
+async function renderGate() {
+  let cfg;
+  try { cfg = await api("/api/config"); }
+  catch(e) { root.innerHTML = `<div class="min-h-screen grid place-items-center px-6 text-center"><p>Impossible de contacter le serveur.<br><span class="text-sm text-[#8A9198]">${esc(e.message)}</span></p></div>`; return; }
+
+  const initialized = cfg.initialized;
+
+  root.innerHTML = `
+    <div class="min-h-screen flex flex-col items-center justify-center px-6 py-12">
+      <div class="w-full max-w-sm">
+        <div class="mb-8 text-center">
+          <div class="text-xs tracking-[0.2em] uppercase text-[#C99A3D] mb-2">Semaine partagée</div>
+          <h1 class="text-3xl" style="font-family:Georgia,serif;">L'Agenda</h1>
+        </div>
+        <div class="paper rounded-lg shadow-xl p-6" id="gate-card"></div>
+      </div>
+    </div>`;
+
+  const card = document.getElementById("gate-card");
+
+  if (!initialized) {
+    card.innerHTML = `
+      <p class="text-sm text-[#5A5040] mb-4">Personne n'a encore initialisé cet agenda. Configure-le en tant qu'hôte.</p>
+      <label class="block mb-3"><span class="text-xs font-medium text-[#5A5040]">Ton prénom (hôte)</span>
+        <input id="f-name" class="mt-1 w-full rounded-md border border-[#D8D0BC] px-3 py-2 text-sm" placeholder="Ex : Camille"></label>
+      <label class="block mb-3"><span class="text-xs font-medium text-[#5A5040]">Code d'accès à partager</span>
+        <input id="f-code" class="mt-1 w-full rounded-md border border-[#D8D0BC] px-3 py-2 text-sm" placeholder="Ex : equipe2026"></label>
+      <label class="block mb-3"><span class="text-xs font-medium text-[#5A5040]">Mot de passe hôte (privilèges)</span>
+        <input id="f-pass" type="password" class="mt-1 w-full rounded-md border border-[#D8D0BC] px-3 py-2 text-sm" placeholder="Réservé à toi"></label>
+      <p id="gate-error" class="text-sm text-[#B23A3A] mb-2 hidden"></p>
+      <button id="btn-create" class="w-full bg-[#1E2A32] text-[#F5F1E8] rounded-md py-2.5 font-medium">Créer l'agenda</button>
+      <p class="text-xs text-[#8A8168] mt-3">Transmets ensuite le lien de cette page + le code d'accès aux autres utilisateurs.</p>
+    `;
+    document.getElementById("btn-create").addEventListener("click", async () => {
+      const name = document.getElementById("f-name").value.trim();
+      const accessCode = document.getElementById("f-code").value.trim();
+      const hostPassword = document.getElementById("f-pass").value.trim();
+      const errEl = document.getElementById("gate-error");
+      errEl.classList.add("hidden");
+      if (!name || !accessCode || !hostPassword) { errEl.textContent="Remplis tous les champs."; errEl.classList.remove("hidden"); return; }
+      try {
+        await api("/api/config/create", { method:"POST", body:{ hostName:name, accessCode, hostPassword } });
+        localStorage.setItem("agenda_name", name);
+        me = name;
+        renderApp();
+      } catch(e) { errEl.textContent = e.message; errEl.classList.remove("hidden"); }
+    });
+  } else {
+    card.innerHTML = `
+      <p class="text-sm text-[#5A5040] mb-4">Entre ton prénom et le code d'accès reçu de l'hôte.</p>
+      <label class="block mb-3"><span class="text-xs font-medium text-[#5A5040]">Ton prénom</span>
+        <input id="f-name" class="mt-1 w-full rounded-md border border-[#D8D0BC] px-3 py-2 text-sm" placeholder="Ex : Léo"></label>
+      <label class="block mb-3"><span class="text-xs font-medium text-[#5A5040]">Code d'accès</span>
+        <input id="f-code" class="mt-1 w-full rounded-md border border-[#D8D0BC] px-3 py-2 text-sm" placeholder="Reçu de l'hôte"></label>
+      <p id="gate-error" class="text-sm text-[#B23A3A] mb-2 hidden"></p>
+      <button id="btn-join" class="w-full bg-[#1E2A32] text-[#F5F1E8] rounded-md py-2.5 font-medium">Entrer</button>
+    `;
+    document.getElementById("btn-join").addEventListener("click", async () => {
+      const name = document.getElementById("f-name").value.trim();
+      const accessCode = document.getElementById("f-code").value.trim();
+      const errEl = document.getElementById("gate-error");
+      errEl.classList.add("hidden");
+      if (!name || !accessCode) { errEl.textContent="Entre ton prénom et le code d'accès."; errEl.classList.remove("hidden"); return; }
+      try {
+        await api("/api/config/join", { method:"POST", body:{ accessCode } });
+        localStorage.setItem("agenda_name", name);
+        me = name;
+        renderApp();
+      } catch(e) { errEl.textContent = e.message; errEl.classList.remove("hidden"); }
+    });
+  }
+}
+
+/* ============== App principale ============== */
+function renderApp() {
+  root.innerHTML = `
+    <div class="min-h-screen pb-20">
+      <header class="flex items-center justify-between px-4 pt-5 pb-3 border-b border-[#2A3A43]">
+        <div>
+          <div class="text-[10px] uppercase tracking-[0.2em] text-[#C99A3D]">Semaine partagée</div>
+          <div class="text-lg font-semibold" style="font-family:Georgia,serif;">Bonjour, ${esc(me)}</div>
+        </div>
+        <button id="host-btn" class="text-xs px-2.5 py-1 rounded-full flex items-center gap-1"></button>
+      </header>
+      <main class="px-4 pt-4 max-w-lg mx-auto" id="tab-content"></main>
+      <nav class="fixed bottom-0 inset-x-0 bg-[#1C2C35] border-t border-[#2A3A43]">
+        <div class="max-w-lg mx-auto flex" id="tabbar"></div>
+      </nav>
+    </div>
+  `;
+  renderHostBadge();
+  renderTabbar();
+  renderTab();
+}
+
+function renderHostBadge() {
+  const btn = document.getElementById("host-btn");
+  if (isHost) {
+    btn.className = "text-xs px-2.5 py-1 rounded-full flex items-center gap-1 bg-[#233541] text-[#C99A3D]";
+    btn.textContent = "🛡 Hôte";
+    btn.onclick = null;
+  } else {
+    btn.className = "text-xs px-2.5 py-1 rounded-full flex items-center gap-1 text-[#8A9198]";
+    btn.textContent = "🔒 Hôte";
+    btn.onclick = showHostLogin;
+  }
+}
+
+function showHostLogin() {
+  const overlay = document.createElement("div");
+  overlay.className = "fixed inset-0 bg-black/50 grid place-items-center px-6 z-50";
+  overlay.innerHTML = `
+    <div class="paper rounded-lg p-5 w-full max-w-xs space-y-3">
+      <div class="font-semibold text-sm">🔒 Connexion hôte</div>
+      <input id="host-pass" type="password" placeholder="Mot de passe hôte" class="w-full rounded-md border border-[#D8D0BC] px-3 py-2 text-sm">
+      <p id="host-err" class="text-xs text-[#B23A3A] hidden"></p>
+      <div class="flex gap-2">
+        <button id="host-cancel" class="flex-1 rounded-md py-2 text-sm border border-[#D8D0BC]">Annuler</button>
+        <button id="host-ok" class="flex-1 rounded-md py-2 text-sm bg-[#1E2A32] text-[#F5F1E8] font-medium">Valider</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById("host-cancel").onclick = () => overlay.remove();
+  document.getElementById("host-ok").onclick = async () => {
+    const pass = document.getElementById("host-pass").value;
+    const err = document.getElementById("host-err");
+    try {
+      await api("/api/config/host-login", { method:"POST", body:{ hostPassword: pass } });
+      isHost = true;
+      overlay.remove();
+      renderHostBadge();
+      renderTab();
+    } catch(e) { err.textContent = e.message; err.classList.remove("hidden"); }
+  };
+}
+
+const TABS = [
+  { id:"agenda", label:"Agenda", icon:"📅" },
+  { id:"memos", label:"Mémos", icon:"📝" },
+  { id:"chat", label:"Tchat", icon:"💬" },
+  { id:"amis", label:"Amis", icon:"👥" },
+  { id:"fichiers", label:"Fichiers", icon:"📁" },
+];
+
+function renderTabbar() {
+  const bar = document.getElementById("tabbar");
+  bar.innerHTML = TABS.map(t => `
+    <button data-tab="${t.id}" class="flex-1 flex flex-col items-center gap-1 py-2.5" style="color:${currentTab===t.id?'#C99A3D':'#7B8791'}">
+      <span style="font-size:18px">${t.icon}</span>
+      <span class="text-[10px] font-medium">${t.label}</span>
+    </button>`).join("");
+  bar.querySelectorAll("button").forEach(b => b.onclick = () => { currentTab = b.dataset.tab; currentDM=null; renderTabbar(); renderTab(); });
+}
+
+let pollTimer = null;
+function renderTab() {
+  if (pollTimer) clearInterval(pollTimer);
+  const el = document.getElementById("tab-content");
+  if (currentTab === "agenda") renderAgenda(el);
+  else if (currentTab === "memos") renderMemos(el);
+  else if (currentTab === "chat") renderChat(el);
+  else if (currentTab === "amis") renderAmis(el);
+  else if (currentTab === "fichiers") renderFichiers(el);
+}
+
+/* ============== Agenda ============== */
+async function renderAgenda(el) {
+  const dates = weekDates();
+  el.innerHTML = `<p class="text-sm text-[#8A8168] px-1 mb-4">${isHost ? "Ajoute un thème pour chaque jour de la semaine." : "Thèmes de la semaine ajoutés par l'hôte."}</p><div id="agenda-list" class="space-y-4"></div>`;
+
+  async function load() {
+    const events = await api("/api/agenda");
+    const list = document.getElementById("agenda-list");
+    if (!list) return;
+    list.innerHTML = dates.map((iso,i) => {
+      const dayEvents = events.filter(e => e.day === iso);
+      return `
+        <div class="rounded-lg overflow-hidden border border-[#2A3A43] bg-[#1C2C35]">
+          <div class="flex items-center justify-between px-4 py-2.5" style="border-left:4px solid ${RUBAN[i]}">
+            <div><div class="text-sm font-semibold">${JOURS[i]}</div><div class="text-xs text-[#8A9198]">${fmtDay(iso)}</div></div>
+            ${isHost ? `<button data-day="${iso}" class="add-day text-[#C99A3D] p-1.5 rounded-md">➕</button>` : ""}
+          </div>
+          <div class="px-4 pb-3 space-y-2">
+            ${dayEvents.length===0 ? `<p class="text-xs text-[#5C6A72] italic">Aucun thème pour le moment.</p>` : ""}
+            ${dayEvents.map(e => `
+              <div class="bg-[#233541] rounded-md px-3 py-2 flex items-start justify-between gap-2">
+                <div><div class="text-sm font-medium">${esc(e.title)}</div>${e.desc?`<div class="text-xs text-[#9AA6AC] mt-0.5">${esc(e.desc)}</div>`:""}</div>
+                ${isHost ? `<button data-id="${e.id}" class="del-event text-[#B23A3A] p-1">🗑</button>` : ""}
+              </div>`).join("")}
+            <div class="add-form hidden" data-day="${iso}"></div>
+          </div>
+        </div>`;
+    }).join("");
+
+    list.querySelectorAll(".add-day").forEach(btn => btn.onclick = () => {
+      const form = list.querySelector(`.add-form[data-day="${btn.dataset.day}"]`);
+      const hidden = form.classList.contains("hidden");
+      list.querySelectorAll(".add-form").forEach(f => f.classList.add("hidden"));
+      if (hidden) {
+        form.classList.remove("hidden");
+        form.innerHTML = `
+          <div class="mt-2 space-y-2 bg-[#233541] rounded-md p-3">
+            <input class="ev-title w-full rounded-md bg-[#16232B] border border-[#2A3A43] px-3 py-2 text-sm" placeholder="Titre du thème">
+            <input class="ev-desc w-full rounded-md bg-[#16232B] border border-[#2A3A43] px-3 py-2 text-sm" placeholder="Détails (optionnel)">
+            <button class="ev-submit w-full bg-[#C99A3D] text-[#1E2A32] rounded-md py-2 text-sm font-semibold">Ajouter</button>
+          </div>`;
+        form.querySelector(".ev-submit").onclick = async () => {
+          const title = form.querySelector(".ev-title").value.trim();
+          const desc = form.querySelector(".ev-desc").value.trim();
+          if (!title) return;
+          await api("/api/agenda", { method:"POST", body:{ day: btn.dataset.day, title, desc, by: me } });
+          load();
+        };
+      }
+    });
+    list.querySelectorAll(".del-event").forEach(btn => btn.onclick = async () => {
+      await api("/api/agenda/" + btn.dataset.id, { method:"DELETE" });
+      load();
+    });
+  }
+  await load();
+  pollTimer = setInterval(load, 5000);
+}
+
+/* ============== Mémos ============== */
+async function renderMemos(el) {
+  let day = JOURS[0];
+  el.innerHTML = `
+    <p class="text-sm text-[#8A8168] px-1 mb-3">Notes visibles uniquement par toi, ${esc(me)}.</p>
+    <div class="flex gap-1.5 flex-wrap px-1 mb-4" id="memo-days"></div>
+    <textarea id="memo-text" rows="10" class="w-full rounded-lg bg-[#1C2C35] border border-[#2A3A43] px-4 py-3 text-sm resize-none"></textarea>
+    <button id="memo-save" class="mt-3 bg-[#C99A3D] text-[#1E2A32] rounded-md px-4 py-2 text-sm font-semibold">Enregistrer</button>
+  `;
+  const memos = await api("/api/memos?name=" + encodeURIComponent(me));
+  const daysBar = document.getElementById("memo-days");
+  function renderDays() {
+    daysBar.innerHTML = JOURS.map((j,i) => `<button data-day="${j}" class="px-3 py-1.5 rounded-full text-xs font-medium" style="background:${day===j?RUBAN[i]:'#1C2C35'};color:${day===j?'#16232B':'#C7CDD1'}">${j}</button>`).join("");
+    daysBar.querySelectorAll("button").forEach(b => b.onclick = () => { day = b.dataset.day; document.getElementById("memo-text").value = memos[day] || ""; renderDays(); });
+  }
+  renderDays();
+  document.getElementById("memo-text").value = memos[day] || "";
+  document.getElementById("memo-save").onclick = async () => {
+    const text = document.getElementById("memo-text").value;
+    memos[day] = text;
+    await api("/api/memos", { method:"POST", body:{ name: me, day, text } });
+  };
+}
+
+/* ============== Tchat ============== */
+async function renderChat(el) {
+  el.innerHTML = `
+    <div class="flex flex-col" style="height:calc(100vh - 190px)">
+      <div id="chat-list" class="flex-1 overflow-y-auto space-y-2 px-1 pb-2"></div>
+      <div class="flex gap-2 pt-2">
+        <input id="chat-input" class="flex-1 rounded-full bg-[#1C2C35] border border-[#2A3A43] px-4 py-2.5 text-sm" placeholder="Écrire un message...">
+        <button id="chat-send" class="bg-[#C99A3D] text-[#1E2A32] rounded-full p-2.5 px-4">➤</button>
+      </div>
+    </div>`;
+  const list = document.getElementById("chat-list");
+  let messages = [];
+
+  function draw() {
+    list.innerHTML = messages.length === 0
+      ? `<p class="text-sm text-[#5C6A72] italic text-center mt-8">Aucun message pour l'instant.</p>`
+      : messages.map(m => `
+        <div class="flex ${m.author===me ? 'justify-end':'justify-start'}">
+          <div class="max-w-[75%] rounded-lg px-3 py-2" style="background:${m.author===me?'#C99A3D':'#1C2C35'};color:${m.author===me?'#16232B':'#F5F1E8'}">
+            ${m.author!==me ? `<div class="text-[10px] font-semibold opacity-70 mb-0.5">${esc(m.author)}</div>` : ""}
+            <div class="text-sm whitespace-pre-wrap break-words">${esc(m.text)}</div>
+          </div>
+        </div>`).join("");
+    list.scrollTop = list.scrollHeight;
+  }
+
+  async function load() {
+    const fresh = await api("/api/chat");
+    messages = fresh;
+    draw();
+  }
+  await load();
+  pollTimer = setInterval(load, 3000);
+
+  async function send() {
+    const input = document.getElementById("chat-input");
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    await api("/api/chat", { method:"POST", body:{ author: me, text } });
+    load();
+  }
+  document.getElementById("chat-send").onclick = send;
+  document.getElementById("chat-input").addEventListener("keydown", e => { if (e.key==="Enter") send(); });
+}
+
+/* ============== Amis ============== */
+async function renderAmis(el) {
+  if (currentDM) return renderDM(el, currentDM);
+  el.innerHTML = `
+    <div class="flex gap-2 mb-5">
+      <input id="friend-name" class="flex-1 rounded-md bg-[#1C2C35] border border-[#2A3A43] px-3 py-2 text-sm" placeholder="Prénom d'un utilisateur">
+      <button id="friend-add" class="bg-[#C99A3D] text-[#1E2A32] rounded-md px-3 text-sm font-semibold">➕ Ajouter</button>
+    </div>
+    <div id="friends-content" class="space-y-5"></div>
+  `;
+  document.getElementById("friend-add").onclick = async () => {
+    const target = document.getElementById("friend-name").value.trim();
+    if (!target) return;
+    try { await api("/api/friends/request", { method:"POST", body:{ from: me, to: target } }); document.getElementById("friend-name").value=""; load(); }
+    catch(e) { alert(e.message); }
+  };
+
+  async function load() {
+    const friends = await api("/api/friends");
+    const incoming = friends.filter(f => f.status==="pending" && f.b.toLowerCase()===me.toLowerCase());
+    const outgoing = friends.filter(f => f.status==="pending" && f.a.toLowerCase()===me.toLowerCase());
+    const accepted = friends.filter(f => f.status==="accepted" && (f.a.toLowerCase()===me.toLowerCase()||f.b.toLowerCase()===me.toLowerCase()));
+    const c = document.getElementById("friends-content");
+    if (!c) return;
+    c.innerHTML = `
+      ${incoming.length ? `<div><div class="text-xs uppercase tracking-wide text-[#8A8168] px-1 mb-1.5">Demandes reçues</div><div class="space-y-1.5">${incoming.map(f=>`
+        <div class="flex items-center justify-between bg-[#1C2C35] rounded-md px-3 py-2.5">
+          <span class="text-sm">${esc(f.a)}</span>
+          <div class="flex gap-2">
+            <button data-id="${f.id}" data-accept="1" class="respond bg-[#3A7D63] p-1.5 rounded-md">✓</button>
+            <button data-id="${f.id}" data-accept="0" class="respond bg-[#B23A3A] p-1.5 rounded-md">✕</button>
+          </div>
+        </div>`).join("")}</div></div>` : ""}
+      ${outgoing.length ? `<div><div class="text-xs uppercase tracking-wide text-[#8A8168] px-1 mb-1.5">Demandes envoyées</div><div class="space-y-1.5">${outgoing.map(f=>`
+        <div class="flex items-center justify-between bg-[#1C2C35] rounded-md px-3 py-2.5 opacity-70"><span class="text-sm">${esc(f.b)}</span><span class="text-xs italic">en attente</span></div>`).join("")}</div></div>` : ""}
+      <div><div class="text-xs uppercase tracking-wide text-[#8A8168] px-1 mb-1.5">Mes amis</div>
+        ${accepted.length===0 ? `<p class="text-xs text-[#5C6A72] italic px-1">Aucun ami pour le moment.</p>` : `<div class="space-y-1.5">${accepted.map(f=>{
+          const friendName = f.a.toLowerCase()===me.toLowerCase() ? f.b : f.a;
+          return `<button data-friend="${esc(friendName)}" class="open-dm w-full flex items-center justify-between bg-[#1C2C35] rounded-md px-3 py-2.5"><span class="text-sm">${esc(friendName)}</span><span class="text-[#C99A3D]">💬</span></button>`;
+        }).join("")}</div>`}
+      </div>
+    `;
+    c.querySelectorAll(".respond").forEach(b => b.onclick = async () => { await api(`/api/friends/${b.dataset.id}/respond`, { method:"POST", body:{ accept: b.dataset.accept==="1" } }); load(); });
+    c.querySelectorAll(".open-dm").forEach(b => b.onclick = () => { currentDM = b.dataset.friend; renderTab(); });
+  }
+  await load();
+  pollTimer = setInterval(load, 4000);
+}
+
+async function renderDM(el, friend) {
+  el.innerHTML = `
+    <button id="dm-back" class="flex items-center gap-1.5 text-sm text-[#C99A3D] mb-2">‹ Retour aux amis</button>
+    <div class="text-sm font-semibold px-1 mb-2">${esc(friend)}</div>
+    <div class="flex flex-col" style="height:calc(100vh - 250px)">
+      <div id="dm-list" class="flex-1 overflow-y-auto space-y-2 px-1 pb-2"></div>
+      <div class="flex gap-2 pt-2">
+        <input id="dm-input" class="flex-1 rounded-full bg-[#1C2C35] border border-[#2A3A43] px-4 py-2.5 text-sm" placeholder="Message à ${esc(friend)}...">
+        <button id="dm-send" class="bg-[#C99A3D] text-[#1E2A32] rounded-full p-2.5 px-4">➤</button>
+      </div>
+    </div>`;
+  document.getElementById("dm-back").onclick = () => { currentDM = null; renderTab(); };
+  const list = document.getElementById("dm-list");
+  let messages = [];
+  function draw() {
+    list.innerHTML = messages.length===0
+      ? `<p class="text-sm text-[#5C6A72] italic text-center mt-8">Dis bonjour à ${esc(friend)} 👋</p>`
+      : messages.map(m => `
+        <div class="flex ${m.author===me?'justify-end':'justify-start'}">
+          <div class="max-w-[75%] rounded-lg px-3 py-2" style="background:${m.author===me?'#C99A3D':'#1C2C35'};color:${m.author===me?'#16232B':'#F5F1E8'}">
+            <div class="text-sm whitespace-pre-wrap break-words">${esc(m.text)}</div>
+          </div>
+        </div>`).join("");
+    list.scrollTop = list.scrollHeight;
+  }
+  async function load() {
+    messages = await api(`/api/dm/${encodeURIComponent(me)}/${encodeURIComponent(friend)}`);
+    draw();
+  }
+  await load();
+  pollTimer = setInterval(load, 3000);
+  async function send() {
+    const input = document.getElementById("dm-input");
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    await api(`/api/dm/${encodeURIComponent(me)}/${encodeURIComponent(friend)}`, { method:"POST", body:{ author: me, text } });
+    load();
+  }
+  document.getElementById("dm-send").onclick = send;
+  document.getElementById("dm-input").addEventListener("keydown", e => { if (e.key==="Enter") send(); });
+}
+
+/* ============== Fichiers ============== */
+async function renderFichiers(el) {
+  let kind = "link";
+  el.innerHTML = `
+    <div class="bg-[#1C2C35] rounded-lg p-3 space-y-2 mb-4">
+      <div class="flex gap-2 text-xs" id="file-kind-toggle">
+        <button data-k="link" class="px-3 py-1.5 rounded-full">Lien</button>
+        <button data-k="text" class="px-3 py-1.5 rounded-full">Note / texte</button>
+      </div>
+      <input id="file-name" class="w-full rounded-md bg-[#16232B] border border-[#2A3A43] px-3 py-2 text-sm" placeholder="Nom du document">
+      <textarea id="file-content" rows="1" class="w-full rounded-md bg-[#16232B] border border-[#2A3A43] px-3 py-2 text-sm resize-none" placeholder="https://..."></textarea>
+      <button id="file-submit" class="w-full bg-[#C99A3D] text-[#1E2A32] rounded-md py-2 text-sm font-semibold">Partager</button>
+      <p class="text-[11px] text-[#8A8168]">Espace prévu pour des liens et documents texte. Les fichiers binaires (images, PDF...) ne sont pas pris en charge — partage un lien Drive/Dropbox.</p>
+    </div>
+    <div id="files-list" class="space-y-2"></div>
+  `;
+  function paintToggle() {
+    document.querySelectorAll("#file-kind-toggle button").forEach(b => {
+      const active = b.dataset.k === kind;
+      b.style.background = active ? "#C99A3D" : "#233541";
+      b.style.color = active ? "#16232B" : "#C7CDD1";
+    });
+    document.getElementById("file-content").rows = kind === "text" ? 5 : 1;
+    document.getElementById("file-content").placeholder = kind === "text" ? "Colle le contenu du document..." : "https://...";
+  }
+  document.querySelectorAll("#file-kind-toggle button").forEach(b => b.onclick = () => { kind = b.dataset.k; paintToggle(); });
+  paintToggle();
+
+  async function load() {
+    const files = await api("/api/files");
+    const listEl = document.getElementById("files-list");
+    listEl.innerHTML = files.length===0 ? `<p class="text-sm text-[#5C6A72] italic px-1">Aucun document partagé.</p>` :
+      files.slice().reverse().map(f => `
+        <div class="bg-[#1C2C35] rounded-lg px-3 py-2.5">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <div class="text-sm font-medium truncate">${esc(f.name)}</div>
+              ${f.kind==="link" ? `<a href="${esc(f.content)}" target="_blank" class="text-xs text-[#7FB0D6] break-all">${esc(f.content)}</a>` : `<div class="text-xs text-[#9AA6AC] whitespace-pre-wrap mt-1">${esc(f.content)}</div>`}
+              <div class="text-[10px] text-[#5C6A72] mt-1">Partagé par ${esc(f.by)}</div>
+            </div>
+            <button data-id="${f.id}" class="del-file text-[#B23A3A] p-1 shrink-0">🗑</button>
+          </div>
+        </div>`).join("");
+    listEl.querySelectorAll(".del-file").forEach(b => b.onclick = async () => { await api("/api/files/"+b.dataset.id, { method:"DELETE" }); load(); });
+  }
+  document.getElementById("file-submit").onclick = async () => {
+    const name = document.getElementById("file-name").value.trim();
+    const content = document.getElementById("file-content").value.trim();
+    if (!name || !content) return;
+    await api("/api/files", { method:"POST", body:{ name, kind, content, by: me } });
+    document.getElementById("file-name").value = "";
+    document.getElementById("file-content").value = "";
+    load();
+  };
+  await load();
+  pollTimer = setInterval(load, 5000);
+}
+
+/* ============== Démarrage ============== */
+(async function init() {
+  if (me) {
+    try {
+      const cfg = await api("/api/config");
+      if (cfg.initialized) { renderApp(); return; }
+    } catch {}
+  }
+  renderGate();
+})();
+</script>
+</body>
+</html>
