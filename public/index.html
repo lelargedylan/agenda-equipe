@@ -27,6 +27,14 @@ function isoDate(d){ const y=d.getFullYear(); const m=String(d.getMonth()+1).pad
 function weekDates(){ const monday=startOfWeekMonday(new Date()); return JOURS.map((_,i)=>{ const d=new Date(monday); d.setDate(monday.getDate()+i); return isoDate(d); }); }
 function fmtDay(iso){ const d=new Date(iso+"T00:00:00"); return d.toLocaleDateString("fr-FR",{day:"numeric",month:"short"}); }
 function esc(s){ const div=document.createElement("div"); div.textContent = s ?? ""; return div.innerHTML; }
+function mySecret() {
+  let s = localStorage.getItem("agenda_secret");
+  if (!s) {
+    s = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));
+    localStorage.setItem("agenda_secret", s);
+  }
+  return s;
+}
 
 async function api(path, opts={}) {
   const res = await fetch(path, {
@@ -329,7 +337,7 @@ async function renderCalendrier(el) {
     <p class="text-[11px] text-[#8A8168] mt-3 px-1">Le petit point doré indique un jour où tu as déjà écrit une note.</p>
   `;
 
-  const memos = await api("/api/memos?name=" + encodeURIComponent(me));
+  const memos = await api("/api/memos?name=" + encodeURIComponent(me) + "&secret=" + encodeURIComponent(mySecret()));
 
   function dayIso(d) {
     const m = String(month+1).padStart(2,"0");
@@ -370,7 +378,7 @@ async function renderCalendrier(el) {
     document.getElementById("cal-save").onclick = async () => {
       const text = document.getElementById("cal-text").value;
       memos[selectedDay] = text;
-      await api("/api/memos", { method:"POST", body:{ name: me, day: selectedDay, text } });
+      await api("/api/memos", { method:"POST", body:{ name: me, day: selectedDay, text, secret: mySecret() } });
       drawGrid();
     };
   }
@@ -388,7 +396,7 @@ async function renderMemos(el) {
     <textarea id="memo-text" rows="10" class="w-full rounded-lg bg-[#1C2C35] border border-[#2A3A43] px-4 py-3 text-sm resize-none"></textarea>
     <button id="memo-save" class="mt-3 bg-[#C99A3D] text-[#1E2A32] rounded-md px-4 py-2 text-sm font-semibold">Enregistrer</button>
   `;
-  const memos = await api("/api/memos?name=" + encodeURIComponent(me));
+  const memos = await api("/api/memos?name=" + encodeURIComponent(me) + "&secret=" + encodeURIComponent(mySecret()));
   const daysBar = document.getElementById("memo-days");
   function renderDays() {
     daysBar.innerHTML = JOURS.map((j,i) => `<button data-day="${j}" class="px-3 py-1.5 rounded-full text-xs font-medium" style="background:${day===j?RUBAN[i]:'#1C2C35'};color:${day===j?'#16232B':'#C7CDD1'}">${j}</button>`).join("");
@@ -399,7 +407,7 @@ async function renderMemos(el) {
   document.getElementById("memo-save").onclick = async () => {
     const text = document.getElementById("memo-text").value;
     memos[day] = text;
-    await api("/api/memos", { method:"POST", body:{ name: me, day, text } });
+    await api("/api/memos", { method:"POST", body:{ name: me, day, text, secret: mySecret() } });
   };
 }
 
