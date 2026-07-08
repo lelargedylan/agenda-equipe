@@ -35,6 +35,22 @@ function mySecret() {
   }
   return s;
 }
+function manageSecret() {
+  const current = mySecret();
+  const wantsChange = confirm(
+    "Ton code personnel sur CET appareil est :\n\n" + current +
+    "\n\nPour retrouver ton calendrier depuis un autre appareil (téléphone/ordinateur), tu dois utiliser exactement le même code sur les deux.\n\n" +
+    "Appuie sur OK pour saisir/coller un code (par exemple celui affiché sur ton autre appareil). Appuie sur Annuler pour fermer sans rien changer."
+  );
+  if (wantsChange) {
+    const input = prompt("Colle ici le code à utiliser sur cet appareil :", current);
+    if (input && input.trim() && input.trim() !== current) {
+      localStorage.setItem("agenda_secret", input.trim());
+      alert("Code mis à jour. La page va se recharger.");
+      location.reload();
+    }
+  }
+}
 
 async function api(path, opts={}) {
   const res = await fetch(path, {
@@ -328,6 +344,7 @@ async function renderCalendrier(el) {
 
   el.innerHTML = `
     <p class="text-sm text-[#8A8168] px-1 mb-3">Notes personnelles par jour, visibles uniquement par toi, ${esc(me)}.</p>
+    <button onclick="manageSecret()" class="text-xs text-[#C99A3D] underline mb-3">🔑 Synchroniser avec un autre appareil</button>
     <div class="text-center text-sm font-semibold mb-3">${monthNames[month]} ${year}</div>
     <div class="grid grid-cols-7 gap-1 text-center text-[10px] text-[#8A9198] mb-1">
       ${["L","M","M","J","V","S","D"].map(d=>`<div>${d}</div>`).join("")}
@@ -392,6 +409,7 @@ async function renderMemos(el) {
   let day = JOURS[0];
   el.innerHTML = `
     <p class="text-sm text-[#8A8168] px-1 mb-3">Notes visibles uniquement par toi, ${esc(me)}.</p>
+    <button onclick="manageSecret()" class="text-xs text-[#C99A3D] underline mb-3">🔑 Synchroniser avec un autre appareil</button>
     <div class="flex gap-1.5 flex-wrap px-1 mb-4" id="memo-days"></div>
     <textarea id="memo-text" rows="10" class="w-full rounded-lg bg-[#1C2C35] border border-[#2A3A43] px-4 py-3 text-sm resize-none"></textarea>
     <button id="memo-save" class="mt-3 bg-[#C99A3D] text-[#1E2A32] rounded-md px-4 py-2 text-sm font-semibold">Enregistrer</button>
