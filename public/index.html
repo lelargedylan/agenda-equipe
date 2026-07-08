@@ -211,6 +211,7 @@ function showHostLogin() {
 
 const TABS = [
   { id:"agenda", label:"Agenda", icon:"📅" },
+  { id:"calendrier", label:"Calendrier", icon:"🗓️" },
   { id:"memos", label:"Mémos", icon:"📝" },
   { id:"chat", label:"Tchat", icon:"💬" },
   { id:"amis", label:"Amis", icon:"👥" },
@@ -234,6 +235,7 @@ function renderTab() {
   if (pollTimer) clearInterval(pollTimer);
   const el = document.getElementById("tab-content");
   if (currentTab === "agenda") renderAgenda(el);
+  else if (currentTab === "calendrier") renderCalendrier(el);
   else if (currentTab === "memos") renderMemos(el);
   else if (currentTab === "chat") renderChat(el);
   else if (currentTab === "amis") renderAmis(el);
@@ -303,6 +305,78 @@ async function renderAgenda(el) {
   }
   await load();
   pollTimer = setInterval(load, 5000);
+}
+/* ============== Calendrier (notes privées par jour du mois) ============== */
+async function renderCalendrier(el) {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const monthNames = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const firstDay = new Date(year, month, 1).getDay();
+  const leadingBlanks = (firstDay + 6) % 7;
+  const todayIso = isoDate(now);
+  let selectedDay = todayIso;
+
+  el.innerHTML = `
+    <p class="text-sm text-[#8A8168] px-1 mb-3">Notes personnelles par jour, visibles uniquement par toi, ${esc(me)}.</p>
+    <div class="text-center text-sm font-semibold mb-3">${monthNames[month]} ${year}</div>
+    <div class="grid grid-cols-7 gap-1 text-center text-[10px] text-[#8A9198] mb-1">
+      ${["L","M","M","J","V","S","D"].map(d=>`<div>${d}</div>`).join("")}
+    </div>
+    <div class="grid grid-cols-7 gap-1 mb-4" id="cal-grid"></div>
+    <div class="bg-[#1C2C35] rounded-lg p-3" id="cal-editor"></div>
+    <p class="text-[11px] text-[#8A8168] mt-3 px-1">Le petit point doré indique un jour où tu as déjà écrit une note.</p>
+  `;
+
+  const memos = await api("/api/memos?name=" + encodeURIComponent(me));
+
+  function dayIso(d) {
+    const m = String(month+1).padStart(2,"0");
+    const dd = String(d).padStart(2,"0");
+    return `${year}-${m}-${dd}`;
+  }
+
+  function drawGrid() {
+    const grid = document.getElementById("cal-grid");
+    let html = "";
+    for (let i=0;i<leadingBlanks;i++) html += `<div></div>`;
+    for (let d=1; d<=daysInMonth; d++) {
+      const iso = dayIso(d);
+      const hasNote = !!(memos[iso] && memos[iso].trim());
+      const isToday = iso === todayIso;
+      const isSelected = iso === selectedDay;
+      html += `
+        <button data-day="${iso}" class="cal-day aspect-square rounded-md flex items-center justify-center text-sm relative"
+          style="background:${isSelected?'#C99A3D':(isToday?'#233541':'#1C2C35')};color:${isSelected?'#16232B':'#F5F1E8'};${isToday && !isSelected ? 'box-shadow:inset 0 0 0 1px #C99A3D;' : ''}">
+          ${d}
+          ${hasNote ? `<span class="absolute bottom-1 w-1 h-1 rounded-full" style="background:${isSelected?'#16232B':'#C99A3D'}"></span>` : ""}
+        </button>`;
+    }
+    grid.innerHTML = html;
+    grid.querySelectorAll(".cal-day").forEach(b => b.onclick = () => { selectedDay = b.dataset.day; drawGrid(); drawEditor(); });
+  }
+
+  function drawEditor() {
+    const editor = document.getElementById("cal-editor");
+    const d = new Date(selectedDay + "T00:00:00");
+    const label = d.toLocaleDateString("fr-FR", { weekday:"long", day:"numeric", month:"long" });
+    editor.innerHTML = `
+      <div class="text-sm font-medium mb-2 capitalize">${label}</div>
+      <textarea id="cal-text" rows="6" class="w-full rounded-md bg-[#16232B] border border-[#2A3A43] px-3 py-2 text-sm resize-none" placeholder="Écris une note personnelle pour ce jour..."></textarea>
+      <button id="cal-save" class="mt-2 bg-[#C99A3D] text-[#1E2A32] rounded-md px-4 py-2 text-sm font-semibold">Enregistrer</button>
+    `;
+    document.getElementById("cal-text").value = memos[selectedDay] || "";
+    document.getElementById("cal-save").onclick = async () => {
+      const text = document.getElementById("cal-text").value;
+      memos[selectedDay] = text;
+      await api("/api/memos", { method:"POST", body:{ name: me, day: selectedDay, text } });
+      drawGrid();
+    };
+  }
+
+  drawGrid();
+  drawEditor();
 }
 
 /* ============== Mémos ============== */
