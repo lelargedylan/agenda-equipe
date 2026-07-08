@@ -26,6 +26,7 @@ function emptyState() {
     agenda: [], // { id, day (YYYY-MM-DD), title, desc, by, createdAt }
     chat: [], // { id, author, text, ts }
     memos: {}, // { [name]: { [day]: text } }
+    memoSecrets: {}, // { [name]: hashedSecret } - verrouille les mémos/calendrier par personne
     friends: [], // { id, a, b, status, requestedBy }
     dms: {}, // { [pairKey]: [ {id, author, text, ts} ] }
     files: [], // { id, name, kind, content, by, ts }
@@ -66,6 +67,9 @@ loadState();
 /* ---------------- Utilitaires ---------------- */
 function hashPassword(password, salt) {
   return crypto.scryptSync(password, salt, 32).toString("hex");
+}
+function hashToken(token) {
+  return crypto.createHash("sha256").update(String(token)).digest("hex");
 }
 function uid() {
   return crypto.randomBytes(6).toString("hex");
@@ -155,15 +159,32 @@ app.post("/api/chat", (req, res) => {
 /* ---------------- Mémos privés ---------------- */
 app.get("/api/memos", (req, res) => {
   const name = (req.query.name || "").trim();
-  if (!name) return badRequest(res, "Nom manquant.");
+  const secret = (req.query.secret || "").trim();
+  if (!name || !secret) return badRequest(res, "Nom ou clé manquant.");
+  if (!state.memoSecrets) state.memoSecrets = {};
+  const h = hashToken(secret);
+  if (!state.memoSecrets[name]) {
+    state.memoSecrets[name] = h;
+    saveState();
+  } else if (state.memoSecrets[name] !== h) {
+    return res.status(403).json({ error: "Accès refusé : ce calendrier appartient à quelqu'un d'autre." });
+  }
   res.json(state.memos[name] || {});
 });
 
 app.post("/api/memos", (req, res) => {
-  const { name, day, text } = req.body || {};
-  if (!name?.trim() || !day) return badRequest(res, "Champs manquants.");
-  if (!state.memos[name.trim()]) state.memos[name.trim()] = {};
-  state.memos[name.trim()][day] = text || "";
+  const { name, day, text, secret } = req.body || {};
+  if (!name?.trim() || !day || !secret) return badRequest(res, "Champs manquants.");
+  if (!state.memoSecrets) state.memoSecrets = {};
+  const trimmedName = name.trim();
+  const h = hashToken(secret);
+  if (!state.memoSecrets[trimmedName]) {
+    state.memoSecrets[trimmedName] = h;
+  } else if (state.memoSecrets[trimmedName] !== h) {
+    return res.status(403).json({ error: "Accès refusé : ce calendrier appartient à quelqu'un d'autre." });
+  }
+  if (!state.memos[trimmedName]) state.memos[trimmedName] = {};
+  state.memos[trimmedName][day] = text || "";
   saveState();
   res.json({ ok: true });
 });
