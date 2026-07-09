@@ -31,6 +31,7 @@ function emptyState() {
     friends: [], // { id, a, b, status, requestedBy }
     dms: {}, // { [pairKey]: [ {id, author, text, ts} ] }
     files: [], // { id, name, kind, content, by, ts }
+    demarches: {}, // { [name]: [ { id, date, lieu, resultat, ts } ] } - privé par personne, hôte en lecture seule
   };
 }
 
@@ -282,6 +283,66 @@ app.delete("/api/files/:id", (req, res) => {
   res.json({ ok: true });
 });
 
+/* ---------------- Démarches (privé par personne, hôte en lecture seule) ---------------- */
+function checkPersonalSecret(name, secret) {
+  if (!state.memoSecrets) state.memoSecrets = {};
+  const h = hashToken(secret);
+  if (!state.memoSecrets[name]) {
+    state.memoSecrets[name] = h;
+    saveState();
+    return true;
+  }
+  return state.memoSecrets[name] === h;
+}
+
+app.get("/api/demarches", (req, res) => {
+  const name = (req.query.name || "").trim();
+  const secret = (req.query.secret || "").trim();
+  if (!name || !secret) return badRequest(res, "Nom ou clé manquant.");
+  if (!checkPersonalSecret(name, secret)) {
+    return res.status(403).json({ error: "Accès refusé : ce tableau appartient à quelqu'un d'autre." });
+  }
+  res.json(state.demarches[name] || []);
+});
+
+app.post("/api/demarches", (req, res) => {
+  const { name, secret, date, lieu, resultat } = req.body || {};
+  const trimmedName = (name || "").trim();
+  if (!trimmedName || !secret || !date || !lieu?.trim()) return badRequest(res, "Champs manquants.");
+  if (!checkPersonalSecret(trimmedName, secret)) {
+    return res.status(403).json({ error: "Accès refusé : ce tableau appartient à quelqu'un d'autre." });
+  }
+  if (!state.demarches[trimmedName]) state.demarches[trimmedName] = [];
+  const entry = { id: uid(), date, lieu: lieu.trim(), resultat: (resultat || "").trim(), ts: Date.now() };
+  state.demarches[trimmedName].push(entry);
+  saveState();
+  res.json(entry);
+});
+
+app.delete("/api/demarches/:id", (req, res) => {
+  const name = (req.query.name || "").trim();
+  const secret = (req.query.secret || "").trim();
+  if (!name || !secret) return badRequest(res, "Nom ou clé manquant.");
+  if (!checkPersonalSecret(name, secret)) {
+    return res.status(403).json({ error: "Accès refusé : ce tableau appartient à quelqu'un d'autre." });
+  }
+  if (state.demarches[name]) {
+    state.demarches[name] = state.demarches[name].filter((d) => d.id !== req.params.id);
+    saveState();
+  }
+  res.json({ ok: true });
+});
+
+app.get("/api/demarches/all", (req, res) => {
+  if (!state.config) return badRequest(res, "Agenda non initialisé.");
+  const { hostPassword } = req.query;
+  if (!hostPassword) return badRequest(res, "Mot de passe hôte requis.");
+  const hash = hashPassword(String(hostPassword).trim(), state.config.salt);
+  if (hash !== state.config.hostPasswordHash) {
+    return res.status(401).json({ error: "Mot de passe hôte incorrect." });
+  }
+  res.json(state.demarches || {});
+});
 /* ---------------- Page d'accueil (fallback SPA) ---------------- */
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
