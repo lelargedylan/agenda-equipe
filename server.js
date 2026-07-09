@@ -13,7 +13,7 @@ const path = require("path");
 const crypto = require("crypto");
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "8mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const PORT = process.env.PORT || 3000;
@@ -32,6 +32,7 @@ function emptyState() {
     dms: {}, // { [pairKey]: [ {id, author, text, ts} ] }
     files: [], // { id, name, kind, content, by, ts }
     demarches: {}, // { [name]: [ { id, date, lieu, resultat, ts } ] } - privé par personne, hôte en lecture seule
+    formations: [], // { id, kind: 'link'|'photo', name, content, by, ts } - partagé, visible par tous
   };
 }
 
@@ -342,6 +343,30 @@ app.get("/api/demarches/all", (req, res) => {
     return res.status(401).json({ error: "Mot de passe hôte incorrect." });
   }
   res.json(state.demarches || {});
+});
+/* ---------------- Formation (partagé, visible par tous) ---------------- */
+app.get("/api/formations", (req, res) => res.json(state.formations));
+
+app.post("/api/formations", (req, res) => {
+  const { name, kind, content, by } = req.body || {};
+  if (!content?.trim() || !by?.trim()) return badRequest(res, "Champs manquants.");
+  const item = {
+    id: uid(),
+    kind: kind === "photo" ? "photo" : "link",
+    name: (name || "").trim(),
+    content: content.trim(),
+    by: by.trim(),
+    ts: Date.now(),
+  };
+  state.formations.push(item);
+  saveState();
+  res.json(item);
+});
+
+app.delete("/api/formations/:id", (req, res) => {
+  state.formations = state.formations.filter((f) => f.id !== req.params.id);
+  saveState();
+  res.json({ ok: true });
 });
 /* ---------------- Page d'accueil (fallback SPA) ---------------- */
 app.get("*", (req, res) => {
