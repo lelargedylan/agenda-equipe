@@ -399,10 +399,10 @@ function renderAgendaHub(el) {
       <button id="week-next" class="text-[#C99A3D] px-3 py-1.5 rounded-md bg-[#1C2C35] text-sm">▶</button>
     </div>
     <p class="text-sm text-[#8A8168] px-1 mb-4">${isHost ? "Ajoute un thème pour chaque jour de la semaine." : "Thèmes de la semaine ajoutés par l'hôte."}</p><div id="important-note" class="mb-4"></div><div id="agenda-list" class="space-y-4"></div>`;
-  document.getElementById("week-prev").onclick = () => { agendaWeekOffset--; renderAgenda(el); };
-  document.getElementById("week-next").onclick = () => { agendaWeekOffset++; renderAgenda(el); };
+  document.getElementById("week-prev").onclick = () => { if (pollTimer) clearInterval(pollTimer); agendaWeekOffset--; renderAgenda(el); };
+  document.getElementById("week-next").onclick = () => { if (pollTimer) clearInterval(pollTimer); agendaWeekOffset++; renderAgenda(el); };
   const weekTodayBtn = document.getElementById("week-today");
-  if (weekTodayBtn) weekTodayBtn.onclick = () => { agendaWeekOffset = 0; renderAgenda(el); };
+  if (weekTodayBtn) weekTodayBtn.onclick = () => { if (pollTimer) clearInterval(pollTimer); agendaWeekOffset = 0; renderAgenda(el); };
   await loadImportantNote();
 
   async function load() {
