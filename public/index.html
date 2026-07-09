@@ -99,7 +99,26 @@ function markChatRead() {
   localStorage.setItem("agenda_chat_lastread", String(lastReadChatTs));
   updateChatBadge();
 }
-
+let lastReadFormationTs = Number(localStorage.getItem("agenda_formation_lastread") || 0);
+async function updateFormationBadge() {
+  try {
+    const items = await api("/api/formations");
+    const unread = items.filter(m => m.ts > lastReadFormationTs && m.by !== me).length;
+    const badge = document.getElementById("formation-badge");
+    if (!badge) return;
+    if (unread > 0 && currentTab !== "formation") {
+      badge.textContent = unread > 99 ? "99+" : String(unread);
+      badge.classList.remove("hidden");
+    } else {
+      badge.classList.add("hidden");
+    }
+  } catch {}
+}
+function markFormationRead() {
+  lastReadFormationTs = Date.now();
+  localStorage.setItem("agenda_formation_lastread", String(lastReadFormationTs));
+  updateFormationBadge();
+}
 /* ============== Écran d'entrée ============== */
 async function renderGate() {
   let cfg;
