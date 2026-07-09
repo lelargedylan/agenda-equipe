@@ -24,7 +24,7 @@ const RUBAN = ["#B23A3A","#C99A3D","#3A7D63","#2F6690","#7A4E9E"];
 
 function startOfWeekMonday(d){ const date=new Date(d); const day=date.getDay(); const diff=(day+6)%7; date.setDate(date.getDate()-diff); date.setHours(0,0,0,0); return date; }
 function isoDate(d){ const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,"0"); const day=String(d.getDate()).padStart(2,"0"); return `${y}-${m}-${day}`; }
-function weekDates(){ const monday=startOfWeekMonday(new Date()); return JOURS.map((_,i)=>{ const d=new Date(monday); d.setDate(monday.getDate()+i); return isoDate(d); }); }
+function weekDates(offsetWeeks){ offsetWeeks = offsetWeeks || 0; const monday=startOfWeekMonday(new Date()); monday.setDate(monday.getDate() + offsetWeeks*7); return JOURS.map((_,i)=>{ const d=new Date(monday); d.setDate(monday.getDate()+i); return isoDate(d); }); }
 function fmtDay(iso){ const d=new Date(iso+"T00:00:00"); return d.toLocaleDateString("fr-FR",{day:"numeric",month:"short"}); }
 function esc(s){ const div=document.createElement("div"); div.textContent = s ?? ""; return div.innerHTML; }
 function mySecret() {
@@ -285,7 +285,8 @@ function renderTabbar() {
 }
 
 let pollTimer = null;
-function renderTab() {
+let agendaWeekOffset = 0;
+  function renderTab() {
   if (pollTimer) clearInterval(pollTimer);
   const el = document.getElementById("tab-content");
   if (currentTab === "agenda") renderAgendaHub(el);
@@ -352,6 +353,7 @@ async function loadImportantNote() {
 }
   /* ============== Hub Agenda (regroupe Semaine + Calendrier en sous-onglets) ============== */
 function renderAgendaHub(el) {
+  agendaWeekOffset = 0;
   let subTab = "agenda";
   el.innerHTML = `
     <div class="flex gap-2 mb-4 px-1" id="agenda-subtabs"></div>
@@ -385,9 +387,22 @@ function renderAgendaHub(el) {
   renderSub();
 }
   async function renderAgenda(el) {
-  const dates = weekDates();
-  el.innerHTML = `<p class="text-sm text-[#8A8168] px-1 mb-4">${isHost ? "Ajoute un thème pour chaque jour de la semaine." : "Thèmes de la semaine ajoutés par l'hôte."}</p><div id="important-note" class="mb-4"></div><div id="agenda-list" class="space-y-4"></div>`;
-
+  const dates = weekDates(agendaWeekOffset);
+  const weekLabel = fmtDay(dates[0]) + " → " + fmtDay(dates[4]);
+  el.innerHTML = `
+    <div class="flex items-center justify-between mb-3 px-1">
+      <button id="week-prev" class="text-[#C99A3D] px-3 py-1.5 rounded-md bg-[#1C2C35] text-sm">◀</button>
+      <div class="text-center">
+        <div class="text-xs text-[#8A9198]">${weekLabel}</div>
+        ${agendaWeekOffset !== 0 ? `<button id="week-today" class="text-[10px] text-[#C99A3D] underline">Revenir à cette semaine</button>` : ""}
+      </div>
+      <button id="week-next" class="text-[#C99A3D] px-3 py-1.5 rounded-md bg-[#1C2C35] text-sm">▶</button>
+    </div>
+    <p class="text-sm text-[#8A8168] px-1 mb-4">${isHost ? "Ajoute un thème pour chaque jour de la semaine." : "Thèmes de la semaine ajoutés par l'hôte."}</p><div id="important-note" class="mb-4"></div><div id="agenda-list" class="space-y-4"></div>`;
+  document.getElementById("week-prev").onclick = () => { agendaWeekOffset--; renderAgenda(el); };
+  document.getElementById("week-next").onclick = () => { agendaWeekOffset++; renderAgenda(el); };
+  const weekTodayBtn = document.getElementById("week-today");
+  if (weekTodayBtn) weekTodayBtn.onclick = () => { agendaWeekOffset = 0; renderAgenda(el); };
   await loadImportantNote();
 
   async function load() {
