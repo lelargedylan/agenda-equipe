@@ -65,6 +65,13 @@ async function api(path, opts={}) {
 
 /* ============== État local ============== */
 let me = localStorage.getItem("agenda_name") || "";
+let hostPasswordCache = null;
+function getHostPassword() {
+  if (hostPasswordCache) return hostPasswordCache;
+  const pass = prompt("Mot de passe hôte :");
+  if (pass) hostPasswordCache = pass;
+  return pass;
+}
 let isHost = false;
 let currentTab = "agenda";
 let currentDM = null;
@@ -226,6 +233,7 @@ function showHostLogin() {
     try {
       await api("/api/config/host-login", { method:"POST", body:{ hostPassword: pass } });
       isHost = true;
+      hostPasswordCache = pass;
       overlay.remove();
       renderHostBadge();
       renderTab();
@@ -267,9 +275,64 @@ function renderTab() {
 }
 
 /* ============== Agenda ============== */
-async function renderAgenda(el) {
+async function loadImportantNote() {
+  const box = document.getElementById("important-note");
+  if (!box) return;
+  const data = await api("/api/note");
+  const text = data.text || "";
+
+  if (!text && !isHost) { box.innerHTML = ""; return; }
+
+  box.innerHTML = `
+    <div class="rounded-lg border border-[#C99A3D] bg-[#2a2416] p-3">
+      <div class="flex items-center justify-between mb-1">
+        <div class="text-xs font-semibold text-[#C99A3D]">📌 Note importante</div>
+        ${isHost ? `<button id="note-edit-btn" class="text-xs text-[#C99A3D] underline">Modifier</button>` : ""}
+      </div>
+      <div id="note-display" class="text-sm whitespace-pre-wrap">${text ? esc(text) : `<span class="italic text-[#8A8168]">Aucune note pour le moment.</span>`}</div>
+      <div id="note-edit-area" class="hidden mt-2">
+        <textarea id="note-textarea" rows="4" class="w-full rounded-md bg-[#16232B] border border-[#2A3A43] px-3 py-2 text-sm resize-none"></textarea>
+        <div class="flex gap-2 mt-2">
+          <button id="note-save-btn" class="bg-[#C99A3D] text-[#1E2A32] rounded-md px-3 py-1.5 text-xs font-semibold">Enregistrer</button>
+          <button id="note-delete-btn" class="bg-[#B23A3A] text-white rounded-md px-3 py-1.5 text-xs font-semibold">Supprimer</button>
+          <button id="note-cancel-btn" class="border border-[#2A3A43] rounded-md px-3 py-1.5 text-xs">Annuler</button>
+        </div>
+      </div>
+    </div>`;
+
+  if (!isHost) return;
+
+  document.getElementById("note-edit-btn").onclick = () => {
+    document.getElementById("note-edit-area").classList.remove("hidden");
+    document.getElementById("note-textarea").value = text;
+  };
+  document.getElementById("note-cancel-btn").onclick = () => {
+    document.getElementById("note-edit-area").classList.add("hidden");
+  };
+  document.getElementById("note-save-btn").onclick = async () => {
+    const newText = document.getElementById("note-textarea").value;
+    const pass = getHostPassword();
+    if (!pass) return;
+    try {
+      await api("/api/note", { method:"POST", body:{ text:newText, hostPassword:pass } });
+      loadImportantNote();
+    } catch(e) { hostPasswordCache = null; alert(e.message); }
+  };
+  document.getElementById("note-delete-btn").onclick = async () => {
+    if (!confirm("Supprimer la note importante ?")) return;
+    const pass = getHostPassword();
+    if (!pass) return;
+    try {
+      await api("/api/note", { method:"POST", body:{ text:"", hostPassword:pass } });
+      loadImportantNote();
+    } catch(e) { hostPasswordCache = null; alert(e.message); }
+  };
+}
+  async function renderAgenda(el) {
   const dates = weekDates();
-  el.innerHTML = `<p class="text-sm text-[#8A8168] px-1 mb-4">${isHost ? "Ajoute un thème pour chaque jour de la semaine." : "Thèmes de la semaine ajoutés par l'hôte."}</p><div id="agenda-list" class="space-y-4"></div>`;
+  el.innerHTML = `<p class="text-sm text-[#8A8168] px-1 mb-4">${isHost ? "Ajoute un thème pour chaque jour de la semaine." : "Thèmes de la semaine ajoutés par l'hôte."}</p><div id="important-note" class="mb-4"></div><div id="agenda-list" class="space-y-4"></div>`;
+
+  await loadImportantNote();
 
   async function load() {
     const existingList = document.getElementById("agenda-list");
