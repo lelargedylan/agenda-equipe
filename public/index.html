@@ -245,6 +245,7 @@ const TABS = [
   { id:"agenda", label:"Agenda", icon:"📅" },
   { id:"calendrier", label:"Calendrier", icon:"🗓️" },
   { id:"memos", label:"Mémos", icon:"📝" },
+  { id:"demarches", label:"Démarches", icon:"📋" },
   { id:"chat", label:"Tchat", icon:"💬" },
   { id:"amis", label:"Amis", icon:"👥" },
   { id:"fichiers", label:"Fichiers", icon:"📁" },
@@ -269,6 +270,7 @@ function renderTab() {
   if (currentTab === "agenda") renderAgenda(el);
   else if (currentTab === "calendrier") renderCalendrier(el);
   else if (currentTab === "memos") renderMemos(el);
+  else if (currentTab === "demarches") renderDemarches(el);
   else if (currentTab === "chat") renderChat(el);
   else if (currentTab === "amis") renderAmis(el);
   else if (currentTab === "fichiers") renderFichiers(el);
@@ -521,7 +523,118 @@ async function renderMemos(el) {
   };
 }
 
-/* ============== Tchat ============== */
+/* ============== Démarches (tableau privé par personne, hôte en lecture seule) ============== */
+async function renderDemarches(el) {
+  el.innerHTML = `
+    <p class="text-sm text-[#8A8168] px-1 mb-3">Ton suivi personnel de démarches, visible uniquement par toi.</p>
+    <button onclick="manageSecret()" class="text-xs text-[#C99A3D] underline mb-3 block">🔑 Synchroniser avec un autre appareil</button>
+    <div class="bg-[#1C2C35] rounded-lg p-3 mb-4 space-y-2">
+      <div class="grid grid-cols-3 gap-2">
+        <input id="dem-date" type="date" class="rounded-md bg-[#16232B] border border-[#2A3A43] px-2 py-2 text-xs">
+        <input id="dem-lieu" type="text" placeholder="Lieu" class="rounded-md bg-[#16232B] border border-[#2A3A43] px-2 py-2 text-xs">
+        <input id="dem-resultat" type="text" placeholder="Résultat" class="rounded-md bg-[#16232B] border border-[#2A3A43] px-2 py-2 text-xs">
+      </div>
+      <button id="dem-add" class="w-full bg-[#C99A3D] text-[#1E2A32] rounded-md py-2 text-sm font-semibold">Ajouter une démarche</button>
+    </div>
+    <div id="dem-table-zone"></div>
+    ${isHost ? `
+      <div class="mt-8 pt-4 border-t border-[#2A3A43]">
+        <button id="dem-view-all" class="text-xs text-[#C99A3D] underline">👁 Voir les démarches de tout le monde (lecture seule)</button>
+        <div id="dem-all-zone" class="mt-3 space-y-4"></div>
+      </div>` : ""}
+  `;
+
+  function renderTable(containerId, rows, deletable) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const sorted = rows.slice().sort((a,b) => (a.date < b.date ? 1 : -1));
+    container.innerHTML = `
+      <div class="overflow-x-auto -mx-1">
+        <table class="w-full text-sm border-collapse min-w-[420px]">
+          <thead>
+            <tr class="text-left text-[#C99A3D] border-b border-[#2A3A43]">
+              <th class="py-2 px-1">Date</th>
+              <th class="py-2 px-1">Lieu</th>
+              <th class="py-2 px-1">Résultat</th>
+              ${deletable ? `<th class="py-2 px-1"></th>` : ""}
+            </tr>
+          </thead>
+          <tbody>
+            ${sorted.length === 0
+              ? `<tr><td colspan="${deletable?4:3}" class="py-3 text-xs italic text-[#5C6A72]">Aucune démarche enregistrée.</td></tr>`
+              : sorted.map(r => `
+                <tr class="border-b border-[#2A3A43]/50 align-top">
+                  <td class="py-2 px-1 whitespace-nowrap">${fmtDay(r.date)}</td>
+                  <td class="py-2 px-1">${esc(r.lieu)}</td>
+                  <td class="py-2 px-1">${esc(r.resultat || "—")}</td>
+                  ${deletable ? `<td class="py-2 px-1"><button data-id="${r.id}" class="dem-del text-[#B23A3A]">🗑</button></td>` : ""}
+                </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>`;
+    if (deletable) {
+      container.querySelectorAll(".dem-del").forEach(b => b.onclick = async () => {
+        await api(`/api/demarches/${b.dataset.id}?name=${encodeURIComponent(me)}&secret=${encodeURIComponent(mySecret())}`, { method:"DELETE" });
+        loadMine();
+      });
+    }
+  }
+
+  async function loadMine() {
+    let rows;
+    try {
+      rows = await api("/api/demarches?name=" + encodeURIComponent(me) + "&secret=" + encodeURIComponent(mySecret()));
+    } catch (e) {
+      const zone = document.getElementById("dem-table-zone");
+      if (zone) zone.innerHTML = `
+        <div class="bg-[#2a1c1c] border border-[#B23A3A] rounded-lg p-4 text-sm">
+          <p class="mb-3">⚠️ ${esc(e.message)}</p>
+          <button onclick="manageSecret()" class="text-xs text-[#C99A3D] underline">🔑 Synchroniser avec un autre appareil</button>
+        </div>`;
+      return;
+    }
+    renderTable("dem-table-zone", rows, true);
+  }
+
+  document.getElementById("dem-add").onclick = async () => {
+    const date = document.getElementById("dem-date").value;
+    const lieu = document.getElementById("dem-lieu").value.trim();
+    const resultat = document.getElementById("dem-resultat").value.trim();
+    if (!date || !lieu) return;
+    await api("/api/demarches", { method:"POST", body:{ name: me, secret: mySecret(), date, lieu, resultat } });
+    document.getElementById("dem-lieu").value = "";
+    document.getElementById("dem-resultat").value = "";
+    loadMine();
+  };
+
+  if (isHost) {
+    document.getElementById("dem-view-all").onclick = async () => {
+      const pass = getHostPassword();
+      if (!pass) return;
+      try {
+        const all = await api("/api/demarches/all?hostPassword=" + encodeURIComponent(pass));
+        const zone = document.getElementById("dem-all-zone");
+        const names = Object.keys(all).sort((a,b)=>a.localeCompare(b));
+        if (names.length === 0) {
+          zone.innerHTML = `<p class="text-xs text-[#5C6A72] italic">Personne n'a encore rempli de démarches.</p>`;
+          return;
+        }
+        zone.innerHTML = names.map(n => `
+          <div>
+            <div class="text-sm font-semibold mb-1">${esc(n)}</div>
+            <div id="dem-all-${n.replace(/[^a-zA-Z0-9]/g,'')}"></div>
+          </div>`).join("");
+        names.forEach(n => renderTable("dem-all-" + n.replace(/[^a-zA-Z0-9]/g,''), all[n], false));
+      } catch (e) {
+        hostPasswordCache = null;
+        alert(e.message);
+      }
+    };
+  }
+
+  await loadMine();
+}
+  /* ============== Tchat ============== */
 async function renderChat(el) {
   markChatRead();
   el.innerHTML = `
