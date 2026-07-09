@@ -263,7 +263,6 @@ function showHostLogin() {
 
 const TABS = [
   { id:"agenda", label:"Agenda", icon:"📅" },
-  { id:"calendrier", label:"Calendrier", icon:"🗓️" },
   { id:"memos", label:"Mémos", icon:"📝" },
   { id:"demarches", label:"Démarches", icon:"📋" },
   { id:"chat", label:"Tchat", icon:"💬" },
@@ -290,8 +289,7 @@ let pollTimer = null;
 function renderTab() {
   if (pollTimer) clearInterval(pollTimer);
   const el = document.getElementById("tab-content");
-  if (currentTab === "agenda") renderAgenda(el);
-  else if (currentTab === "calendrier") renderCalendrier(el);
+  if (currentTab === "agenda") renderAgendaHub(el);
   else if (currentTab === "memos") renderMemos(el);
   else if (currentTab === "demarches") renderDemarches(el);
   else if (currentTab === "chat") renderChat(el);
@@ -353,6 +351,40 @@ async function loadImportantNote() {
       loadImportantNote();
     } catch(e) { hostPasswordCache = null; alert(e.message); }
   };
+}
+  /* ============== Hub Agenda (regroupe Semaine + Calendrier en sous-onglets) ============== */
+function renderAgendaHub(el) {
+  let subTab = "agenda";
+  el.innerHTML = `
+    <div class="flex gap-2 mb-4 px-1" id="agenda-subtabs"></div>
+    <div id="agenda-sub-content"></div>
+  `;
+
+  function paintSubtabs() {
+    const bar = document.getElementById("agenda-subtabs");
+    if (!bar) return;
+    bar.innerHTML = `
+      <button data-s="agenda" class="px-3 py-1.5 rounded-full text-xs font-medium" style="background:${subTab==='agenda'?'#C99A3D':'#1C2C35'};color:${subTab==='agenda'?'#16232B':'#C7CDD1'}">📅 Semaine</button>
+      <button data-s="calendrier" class="px-3 py-1.5 rounded-full text-xs font-medium" style="background:${subTab==='calendrier'?'#C99A3D':'#1C2C35'};color:${subTab==='calendrier'?'#16232B':'#C7CDD1'}">🗓️ Calendrier</button>
+    `;
+    bar.querySelectorAll("button").forEach(b => b.onclick = () => {
+      if (subTab === b.dataset.s) return;
+      subTab = b.dataset.s;
+      paintSubtabs();
+      renderSub();
+    });
+  }
+
+  function renderSub() {
+    if (pollTimer) clearInterval(pollTimer);
+    const sub = document.getElementById("agenda-sub-content");
+    if (!sub) return;
+    if (subTab === "agenda") renderAgenda(sub);
+    else renderCalendrier(sub);
+  }
+
+  paintSubtabs();
+  renderSub();
 }
   async function renderAgenda(el) {
   const dates = weekDates();
