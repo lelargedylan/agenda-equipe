@@ -195,8 +195,9 @@ function renderApp() {
   renderTabbar();
   renderTab();
   if (badgeTimer) clearInterval(badgeTimer);
-  badgeTimer = setInterval(updateChatBadge, 5000);
+  badgeTimer = setInterval(() => { updateChatBadge(); updateFormationBadge(); }, 5000);
   updateChatBadge();
+  updateFormationBadge();
 }
 
 function renderHostBadge() {
@@ -247,6 +248,7 @@ const TABS = [
   { id:"memos", label:"Mémos", icon:"📝" },
   { id:"demarches", label:"Démarches", icon:"📋" },
   { id:"chat", label:"Tchat", icon:"💬" },
+  { id:"formation", label:"Formation", icon:"🎓" },
   { id:"amis", label:"Amis", icon:"👥" },
   { id:"fichiers", label:"Fichiers", icon:"📁" },
 ];
@@ -258,9 +260,11 @@ function renderTabbar() {
       <span style="font-size:18px">${t.icon}</span>
       <span class="text-[10px] font-medium">${t.label}</span>
       ${t.id==="chat" ? `<span id="chat-badge" class="hidden absolute top-1 right-1/4 bg-[#B23A3A] text-white text-[10px] font-bold rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-1"></span>` : ""}
+      ${t.id==="formation" ? `<span id="formation-badge" class="hidden absolute top-1 right-1/4 bg-[#B23A3A] text-white text-[10px] font-bold rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-1"></span>` : ""}
     </button>`).join("");
   bar.querySelectorAll("button").forEach(b => b.onclick = () => { currentTab = b.dataset.tab; currentDM=null; renderTabbar(); renderTab(); });
   updateChatBadge();
+  updateFormationBadge();
 }
 
 let pollTimer = null;
@@ -272,6 +276,7 @@ function renderTab() {
   else if (currentTab === "memos") renderMemos(el);
   else if (currentTab === "demarches") renderDemarches(el);
   else if (currentTab === "chat") renderChat(el);
+  else if (currentTab === "formation") renderFormation(el);
   else if (currentTab === "amis") renderAmis(el);
   else if (currentTab === "fichiers") renderFichiers(el);
 }
@@ -774,7 +779,100 @@ async function renderDM(el, friend) {
   document.getElementById("dm-input").addEventListener("keydown", e => { if (e.key==="Enter") send(); });
 }
 
-/* ============== Fichiers ============== */
+/* ============== Formation (partagé, liens + photos, visible par tous) ============== */
+async function renderFormation(el) {
+  markFormationRead();
+  let kind = "link";
+  let pendingPhotoData = null;
+
+  el.innerHTML = `
+    <p class="text-sm text-[#8A8168] px-1 mb-3">Partage des liens ou des photos pour prévenir les autres d'une formation intéressante.</p>
+    <div class="bg-[#1C2C35] rounded-lg p-3 space-y-2 mb-4">
+      <div class="flex gap-2 text-xs" id="form-kind-toggle">
+        <button data-k="link" class="px-3 py-1.5 rounded-full">🔗 Lien</button>
+        <button data-k="photo" class="px-3 py-1.5 rounded-full">🖼️ Photo</button>
+      </div>
+      <input id="form-name" class="w-full rounded-md bg-[#16232B] border border-[#2A3A43] px-3 py-2 text-sm" placeholder="Titre de la formation">
+      <div id="form-content-zone"></div>
+      <button id="form-submit" class="w-full bg-[#C99A3D] text-[#1E2A32] rounded-md py-2 text-sm font-semibold">Partager</button>
+      <p id="form-hint" class="text-[11px] text-[#8A8168]"></p>
+    </div>
+    <div id="formation-list" class="space-y-3"></div>
+  `;
+
+  function paintToggle() {
+    document.querySelectorAll("#form-kind-toggle button").forEach(b => {
+      const active = b.dataset.k === kind;
+      b.style.background = active ? "#C99A3D" : "#233541";
+      b.style.color = active ? "#16232B" : "#C7CDD1";
+    });
+    const zone = document.getElementById("form-content-zone");
+    const hint = document.getElementById("form-hint");
+    pendingPhotoData = null;
+    if (kind === "link") {
+      zone.innerHTML = `<input id="form-link" class="w-full rounded-md bg-[#16232B] border border-[#2A3A43] px-3 py-2 text-sm" placeholder="https://...">`;
+      hint.textContent = "";
+    } else {
+      zone.innerHTML = `<input id="form-photo" type="file" accept="image/*" class="w-full text-xs text-[#C7CDD1]">`;
+      hint.textContent = "Photo max ~4 Mo.";
+      document.getElementById("form-photo").addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (file.size > 4 * 1024 * 1024) {
+          alert("Cette photo est trop lourde (max ~4 Mo). Choisis-en une plus légère.");
+          e.target.value = "";
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => { pendingPhotoData = reader.result; };
+        reader.readAsDataURL(file);
+      });
+    }
+  }
+  document.querySelectorAll("#form-kind-toggle button").forEach(b => b.onclick = () => { kind = b.dataset.k; paintToggle(); });
+  paintToggle();
+
+  document.getElementById("form-submit").onclick = async () => {
+    const name = document.getElementById("form-name").value.trim();
+    let content = "";
+    if (kind === "link") {
+      content = document.getElementById("form-link").value.trim();
+      if (!content) return;
+    } else {
+      if (!pendingPhotoData) { alert("Choisis une photo d'abord."); return; }
+      content = pendingPhotoData;
+    }
+    await api("/api/formations", { method:"POST", body:{ name, kind, content, by: me } });
+    document.getElementById("form-name").value = "";
+    paintToggle();
+    load();
+  };
+
+  async function load() {
+    const items = await api("/api/formations");
+    const listEl = document.getElementById("formation-list");
+    if (!listEl) return;
+    listEl.innerHTML = items.length===0 ? `<p class="text-sm text-[#5C6A72] italic px-1">Aucune formation partagée pour le moment.</p>` :
+      items.slice().reverse().map(f => `
+        <div class="bg-[#1C2C35] rounded-lg overflow-hidden">
+          ${f.kind==="photo" ? `<img src="${f.content}" class="w-full max-h-72 object-cover">` : ""}
+          <div class="p-3">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                ${f.name ? `<div class="text-sm font-medium mb-0.5">${esc(f.name)}</div>` : ""}
+                ${f.kind==="link" ? `<a href="${esc(f.content)}" target="_blank" class="text-xs text-[#7FB0D6] break-all">${esc(f.content)}</a>` : ""}
+                <div class="text-[10px] text-[#5C6A72] mt-1">Partagé par ${esc(f.by)}</div>
+              </div>
+              <button data-id="${f.id}" class="form-del text-[#B23A3A] p-1 shrink-0">🗑</button>
+            </div>
+          </div>
+        </div>`).join("");
+    listEl.querySelectorAll(".form-del").forEach(b => b.onclick = async () => { await api("/api/formations/"+b.dataset.id, { method:"DELETE" }); load(); });
+  }
+  await load();
+  pollTimer = setInterval(() => { load(); markFormationRead(); }, 5000);
+}
+  /* ============== Fichiers ============== */
 async function renderFichiers(el) {
   let kind = "link";
   el.innerHTML = `
