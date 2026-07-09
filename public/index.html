@@ -267,7 +267,6 @@ const TABS = [
   { id:"demarches", label:"Démarches", icon:"📋" },
   { id:"chat", label:"Tchat", icon:"💬" },
   { id:"formation", label:"Formation", icon:"🎓" },
-  { id:"amis", label:"Amis", icon:"👥" },
   { id:"fichiers", label:"Fichiers", icon:"📁" },
 ];
 
@@ -292,9 +291,8 @@ function renderTab() {
   if (currentTab === "agenda") renderAgendaHub(el);
   else if (currentTab === "memos") renderMemos(el);
   else if (currentTab === "demarches") renderDemarches(el);
-  else if (currentTab === "chat") renderChat(el);
+  else if (currentTab === "chat") renderChatHub(el);
   else if (currentTab === "formation") renderFormation(el);
-  else if (currentTab === "amis") renderAmis(el);
   else if (currentTab === "fichiers") renderFichiers(el);
 }
 
@@ -691,7 +689,41 @@ async function renderDemarches(el) {
   await loadMine();
 }
   /* ============== Tchat ============== */
-async function renderChat(el) {
+/* ============== Hub Tchat (regroupe Tchat + Amis en sous-onglets) ============== */
+function renderChatHub(el) {
+  let subTab = "chat";
+  el.innerHTML = `
+    <div class="flex gap-2 mb-4 px-1" id="chat-subtabs"></div>
+    <div id="chat-sub-content"></div>
+  `;
+
+  function paintSubtabs() {
+    const bar = document.getElementById("chat-subtabs");
+    if (!bar) return;
+    bar.innerHTML = `
+      <button data-s="chat" class="px-3 py-1.5 rounded-full text-xs font-medium" style="background:${subTab==='chat'?'#C99A3D':'#1C2C35'};color:${subTab==='chat'?'#16232B':'#C7CDD1'}">💬 Tchat</button>
+      <button data-s="amis" class="px-3 py-1.5 rounded-full text-xs font-medium" style="background:${subTab==='amis'?'#C99A3D':'#1C2C35'};color:${subTab==='amis'?'#16232B':'#C7CDD1'}">👥 Amis</button>
+    `;
+    bar.querySelectorAll("button").forEach(b => b.onclick = () => {
+      if (subTab === b.dataset.s) return;
+      subTab = b.dataset.s;
+      paintSubtabs();
+      renderSub();
+    });
+  }
+
+  function renderSub() {
+    if (pollTimer) clearInterval(pollTimer);
+    const sub = document.getElementById("chat-sub-content");
+    if (!sub) return;
+    if (subTab === "chat") renderChat(sub);
+    else renderAmis(sub);
+  }
+
+  paintSubtabs();
+  renderSub();
+}
+  async function renderChat(el) {
   markChatRead();
   el.innerHTML = `
     <div class="flex flex-col" style="height:calc(100vh - 190px)">
