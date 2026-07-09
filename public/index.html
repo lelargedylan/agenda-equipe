@@ -27,10 +27,16 @@ function isoDate(d){ const y=d.getFullYear(); const m=String(d.getMonth()+1).pad
 function weekDates(offsetWeeks){ offsetWeeks = offsetWeeks || 0; const monday=startOfWeekMonday(new Date()); monday.setDate(monday.getDate() + offsetWeeks*7); return JOURS.map((_,i)=>{ const d=new Date(monday); d.setDate(monday.getDate()+i); return isoDate(d); }); }
 function fmtDay(iso){ const d=new Date(iso+"T00:00:00"); return d.toLocaleDateString("fr-FR",{day:"numeric",month:"short"}); }
 function esc(s){ const div=document.createElement("div"); div.textContent = s ?? ""; return div.innerHTML; }
+function generateShortCode() {
+  const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // sans 0/O/1/I/L pour éviter les confusions
+  let code = "";
+  for (let i = 0; i < 8; i++) code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return code.slice(0, 4) + "-" + code.slice(4);
+}
 function mySecret() {
   let s = localStorage.getItem("agenda_secret");
   if (!s) {
-    s = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));
+    s = generateShortCode();
     localStorage.setItem("agenda_secret", s);
   }
   return s;
