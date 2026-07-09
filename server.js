@@ -25,6 +25,7 @@ function emptyState() {
     config: null, // { accessCode, hostName, hostPasswordHash, salt }
     agenda: [], // { id, day (YYYY-MM-DD), title, desc, by, createdAt }
     chat: [], // { id, author, text, ts }
+    importantNote: "", // note épinglée, modifiable uniquement par l'hôte
     memos: {}, // { [name]: { [day]: text } }
     memoSecrets: {}, // { [name]: hashedSecret } - verrouille les mémos/calendrier par personne
     friends: [], // { id, a, b, status, requestedBy }
@@ -131,6 +132,23 @@ app.post("/api/memos/reset", (req, res) => {
   }
   if (!state.memoSecrets) state.memoSecrets = {};
   delete state.memoSecrets[name.trim()];
+  saveState();
+  res.json({ ok: true });
+});
+/* ---------------- Note importante (lecture pour tous, écriture hôte uniquement) ---------------- */
+app.get("/api/note", (req, res) => {
+  res.json({ text: state.importantNote || "" });
+});
+
+app.post("/api/note", (req, res) => {
+  if (!state.config) return badRequest(res, "Agenda non initialisé.");
+  const { text, hostPassword } = req.body || {};
+  if (!hostPassword) return badRequest(res, "Mot de passe hôte requis.");
+  const hash = hashPassword(hostPassword.trim(), state.config.salt);
+  if (hash !== state.config.hostPasswordHash) {
+    return res.status(401).json({ error: "Mot de passe hôte incorrect." });
+  }
+  state.importantNote = (text || "").trim();
   saveState();
   res.json({ ok: true });
 });
