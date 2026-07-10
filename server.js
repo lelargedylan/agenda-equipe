@@ -17,7 +17,7 @@ app.use(express.json({ limit: "8mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const PORT = process.env.PORT || 3000;
-const DATA_FILE = path.join(__dirname, "data.json");
+const DATA_FILE = path.join(process.env.DATA_DIR || __dirname, "data.json");
 
 /* ---------------- Stockage fichier (avec file d'attente d'écriture) --------------- */
 function emptyState() {
