@@ -36,8 +36,36 @@ function emptyState() {
   };
 }
 
+const USE_REDIS = !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+const REDIS_KEY = "agenda_state";
+
+async function redisCommand(...args) {
+  const res = await fetch(process.env.UPSTASH_REDIS_REST_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(args),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data.result;
+}
+
 let state = null;
-function loadState() {
+
+async function loadState() {
+  if (USE_REDIS) {
+    try {
+      const raw = await redisCommand("GET", REDIS_KEY);
+      state = raw ? JSON.parse(raw) : emptyState();
+    } catch (err) {
+      console.error("Erreur de chargement Redis, démarrage à vide:", err);
+      state = emptyState();
+    }
+    return;
+  }
   if (fs.existsSync(DATA_FILE)) {
     try {
       state = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
@@ -48,9 +76,16 @@ function loadState() {
     state = emptyState();
   }
 }
+
 let saving = false;
 let pendingSave = false;
 function saveState() {
+  if (USE_REDIS) {
+    redisCommand("SET", REDIS_KEY, JSON.stringify(state)).catch((err) =>
+      console.error("Erreur de sauvegarde Redis:", err)
+    );
+    return;
+  }
   if (saving) {
     pendingSave = true;
     return;
@@ -65,7 +100,6 @@ function saveState() {
     }
   });
 }
-loadState();
 
 /* ---------------- Utilitaires ---------------- */
 function hashPassword(password, salt) {
@@ -373,6 +407,10 @@ app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-app.listen(PORT, () => {
-  console.log(`Serveur lancé sur http://localhost:${PORT}`);
-});
+(async () => {
+  await loadState();
+  app.listen(PORT, () => {
+    console.log(`Serveur lancé sur http://localhost:${PORT}`);
+    console.log(USE_REDIS ? "Stockage : Upstash Redis (permanent)" : "Stockage : fichier local (non permanent sur Render gratuit)");
+  });
+})();
